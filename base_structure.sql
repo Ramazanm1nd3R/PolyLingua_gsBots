@@ -1,6 +1,6 @@
 CREATE TABLE users (
     user_id SERIAL PRIMARY KEY,
-    telegram_id INTEGER UNIQUE,
+    telegram_id BIGINT UNIQUE,
     username TEXT,
     registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
