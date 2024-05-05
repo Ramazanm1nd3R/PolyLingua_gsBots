@@ -2,6 +2,8 @@ import telebot
 from telebot import types
 import psycopg2
 
+ADMIN_ID = ADMINISTRATOR TG ID  # ID администратора
+
 
 # Подключение к базе данных
 def create_connection():
@@ -23,7 +25,6 @@ def save_user_info(telegram_id, username):
     conn = create_connection()
     if not conn:
         return
-
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -42,7 +43,7 @@ def save_user_info(telegram_id, username):
 
 
 # Создаем бота
-bot_token = 'teleg_token'  # Укажите токен вашего бота
+bot_token = 'teleg_token'
 bot = telebot.TeleBot(bot_token)
 
 # Состояния для обработки пошагового добавления/редактирования курса
@@ -52,86 +53,75 @@ ADD_COURSE, EDIT_COURSE = range(2)
 course_data = {}
 
 
-# Функция для обработки кнопки добавления курса
+@bot.message_handler(commands=['start'])
+def start(message):
+    if message.from_user.id == ADMIN_ID:
+        markup = types.ReplyKeyboardMarkup(row_width=2)
+        btn_add = types.KeyboardButton("Добавить курс")
+        btn_edit = types.KeyboardButton("Редактировать курс")
+        markup.add(btn_add, btn_edit)
+        bot.send_message(message.chat.id, "Выберите действие:", reply_markup=markup)
+    else:
+        bot.send_message(message.chat.id, "У вас нет доступа к этому боту.")
+
+
+@bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID and message.text in ["Добавить курс", "Редактировать курс"])
+def handle_course_actions(message):
+    if message.text == "Добавить курс":
+        add_course(message)
+    elif message.text == "Редактировать курс":
+        edit_course(message)
+
+
 def add_course(message):
     bot.send_message(message.chat.id, "Введите название курса:")
     bot.register_next_step_handler(message, get_course_name, ADD_COURSE)
 
 
-# Начало добавления курса
-def start(message):
-    markup = types.ReplyKeyboardMarkup(row_width=2)
-    btn_add = types.KeyboardButton("Добавить курс")
-    btn_edit = types.KeyboardButton("Редактировать курс")
-    markup.add(btn_add, btn_edit)
-    bot.send_message(message.chat.id, "Выберите действие:", reply_markup=markup)
-
-
-# Получение названия курса
 def get_course_name(message, action):
     course_data[message.chat.id] = {'name': message.text}
     bot.send_message(message.chat.id, "Введите описание курса:")
     bot.register_next_step_handler(message, get_course_description, action)
 
 
-# Получение описания курса
 def get_course_description(message, action):
     course_data[message.chat.id]['description'] = message.text
     bot.send_message(message.chat.id, "Введите цену курса:")
     bot.register_next_step_handler(message, get_course_price, action)
 
 
-# Получение цены курса
 def get_course_price(message, action):
     try:
         price = float(message.text)
         course_data[message.chat.id]['price'] = price
+        bot.send_message(message.chat.id, "Загрузите изображение для курса:")
+        bot.register_next_step_handler(message, get_course_image, action)
     except ValueError:
         bot.send_message(message.chat.id, "Пожалуйста, введите правильную цену.")
         bot.register_next_step_handler(message, get_course_price, action)
-        return
-
-    # Добавление шага для получения изображения
-    bot.send_message(message.chat.id, "Загрузите изображение для курса:")
-    bot.register_next_step_handler(message, get_course_image, action)
 
 
-# Получение изображения курса
 def get_course_image(message, action):
     if message.content_type == 'photo':
         file_id = message.photo[-1].file_id
         file_info = bot.get_file(file_id)
         file_path = file_info.file_path
-
-        # Загрузка изображения
         image_data = bot.download_file(file_path)
-
         image_id = save_image_to_db(image_data)
-
         course_data[message.chat.id]['image_id'] = image_id
-
         save_course_to_db(message.chat.id, action)
     else:
         bot.send_message(message.chat.id, "Пожалуйста, загрузите изображение.")
         bot.register_next_step_handler(message, get_course_image, action)
 
 
-# Функция для сохранения изображения в базу данных
 def save_image_to_db(image_data):
     conn = create_connection()
     if not conn:
         return None
-
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO course_images (image)
-            VALUES (%s)
-            RETURNING image_id
-            """,
-            (psycopg2.Binary(image_data),)
-        )
+        cursor.execute("INSERT INTO course_images (image) VALUES (%s) RETURNING image_id", (psycopg2.Binary(image_data),))
         image_id = cursor.fetchone()[0]
         conn.commit()
         cursor.close()
@@ -142,50 +132,33 @@ def save_image_to_db(image_data):
         return None
 
 
-# Функция для сохранения курса в базу данных
 def save_course_to_db(chat_id, action):
     conn = create_connection()
     if not conn:
         bot.send_message(chat_id, "Ошибка подключения к базе данных.")
         return
-
     data = course_data[chat_id]
-
     try:
         cursor = conn.cursor()
         if action == ADD_COURSE:
-            cursor.execute(
-                """
-                INSERT INTO courses (course_name, course_description, course_price, image_id)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (data['name'], data['description'], data['price'], data['image_id'])
-            )
+            cursor.execute("INSERT INTO courses (course_name, course_description, course_price, image_id) VALUES (%s, %s, %s, %s)", (data['name'], data['description'], data['price'], data['image_id']))
             bot.send_message(chat_id, "Курс успешно добавлен в базу данных.")
         elif action == EDIT_COURSE:
-            cursor.execute(
-                """
-                UPDATE courses
-                SET course_name = %s, course_description = %s, course_price = %s, image_id = %s
-                WHERE course_id = %s
-                """,
-                (data['name'], data['description'], data['price'], data['image_id'], data['course_id'])
-            )
+            cursor.execute("UPDATE courses SET course_name = %s, course_description = %s, course_price = %s, image_id = %s WHERE course_id = %s", (data['name'], data['description'], data['price'], data['image_id'], data['course_id']))
             bot.send_message(chat_id, "Курс успешно обновлен в базу данных.")
         conn.commit()
         cursor.close()
-        conn.close()
     except Exception as e:
         bot.send_message(chat_id, f"Ошибка при сохранении в базу данных: {e}")
+    finally:
+        conn.close()
 
 
-# Обработка кнопки редактирования курса
 def edit_course(message):
     bot.send_message(message.chat.id, "Введите название курса, который хотите отредактировать:")
     bot.register_next_step_handler(message, get_course_info_for_edit)
 
 
-# Получение информации о курсе для редактирования
 def get_course_info_for_edit(message):
     course_name = message.text
     if course_name.strip().lower() == "скип":
@@ -207,7 +180,6 @@ def get_course_info_for_edit(message):
             start(message)
 
 
-# Получение новой информации о курсе для редактирования
 def get_new_course_info_for_edit(message):
     action = EDIT_COURSE
     new_name = message.text.strip()
@@ -220,7 +192,6 @@ def get_new_course_info_for_edit(message):
         bot.register_next_step_handler(message, get_new_course_description_for_edit, action)
 
 
-# Получение нового описания курса для редактирования
 def get_new_course_description_for_edit(message, action):
     new_description = message.text.strip()
     if new_description.lower() == "скип":
@@ -232,7 +203,6 @@ def get_new_course_description_for_edit(message, action):
         bot.register_next_step_handler(message, get_new_course_price_for_edit, action)
 
 
-# Получение новой цены курса для редактирования
 def get_new_course_price_for_edit(message, action):
     new_price = message.text.strip()
     if new_price.lower() == "скип":
@@ -249,7 +219,6 @@ def get_new_course_price_for_edit(message, action):
             bot.register_next_step_handler(message, get_new_course_price_for_edit, action)
 
 
-# Получение нового изображения курса для редактирования
 def get_new_course_image_for_edit(message, action):
     if message.content_type == 'photo':
         file_id = message.photo[-1].file_id
@@ -268,7 +237,6 @@ def get_new_course_image_for_edit(message, action):
         update_course_in_db(message.chat.id)
 
 
-# Поиск информации о курсе по названию
 def find_course_by_name(name):
     conn = create_connection()
     if not conn:
@@ -294,7 +262,6 @@ def find_course_by_name(name):
         return None
 
 
-# Обновление курса в базе данных
 def update_course_in_db(chat_id):
     conn = create_connection()
     if not conn:
@@ -323,21 +290,6 @@ def update_course_in_db(chat_id):
     except Exception as e:
         bot.send_message(chat_id, f"Ошибка при обновлении базы данных: {e}")
 
-
-# Функция для обработки любого сообщения
-@bot.message_handler(func=lambda message: True)
-def track_user(message):
-    save_user_info(
-        telegram_id=message.from_user.id,
-        username=message.from_user.username or "Unknown"
-    )
-
-    if message.text == "Добавить курс":
-        add_course(message)
-    elif message.text == "Редактировать курс":
-        edit_course(message)
-    else:
-        start(message)
 
 # Запуск бота
 bot.polling()
