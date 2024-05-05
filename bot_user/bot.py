@@ -28,7 +28,7 @@ def create_connection():
 
 def send_image_to_user(chat_id, image_data, caption):
     try:
-        bot.send_photo(chat_id, image_data, caption = caption)
+        bot.send_photo(chat_id, image_data, caption=caption)
     except Exception as e:
         print(f"Ошибка при отправке изображения: {e}")
 
@@ -48,17 +48,16 @@ def add_user(telegram_id, username):
 
 # Функция для вывода информации о курсах
 def list_courses(message):
+    bot.send_message(message.chat.id, "Актуальные курсы:\n")
     conn = create_connection()
     if conn is not None:
         cur = conn.cursor()
         cur.execute("SELECT course_name, course_description, course_price, image_id FROM courses")
         courses = cur.fetchall()
-        response = "Список доступных курсов:\n\n"
         for course in courses:
-            response += f"Название: {course[0]}\nОписание: {course[1]}\nЦена: {int(course[2])} тенге\n\n"
+            response = f"Название: {course[0]}\nОписание: {course[1]}\nЦена: {int(course[2])} тенге\n\n"
             image_data = get_image_from_db(course[3])
             send_image_to_user(message.chat.id, image_data, response)
-            response = ""
         cur.close()
         conn.close()
 
@@ -74,7 +73,7 @@ def start(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("О нас", "Информация о курсах", "Связь с нами")
 
-    msg = bot.send_message(message.chat.id, "Добро пожаловать! Выберите действие:", reply_markup=markup)
+    bot.send_message(message.chat.id, "Добро пожаловать! Выберите действие:", reply_markup=markup)
 
 
 # Функция для обработки выбора пользователя
